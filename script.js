@@ -110,8 +110,8 @@ class MQTTManager {
                     StorageManager.addLog('✅ Connecté au broker MQTT');
                     APP_STATE.mqttClient.subscribe(CONFIG.MQTT_TOPICS.TEMP);
                 },
-                onFailure: (error) => {
-                    console.log('Erreur MQTT:', error);
+                onFailure: () => {
+                    console.log('Broker MQTT indisponible');
                     StorageManager.addLog('⚠️ Mode simulation activé (Pas de broker)');
                 }
             });
@@ -126,8 +126,8 @@ class MQTTManager {
             const msg = new Paho.MQTT.Message(message);
             msg.destinationName = topic;
             APP_STATE.mqttClient.send(msg);
-            StorageManager.addLog(`📤 [${topic}] ${message}`);
         }
+        StorageManager.addLog(`📤 [${topic}] ${message}`);
     }
 
     static handleMessage(message) {
@@ -288,7 +288,7 @@ function initAuthListeners() {
 }
 
 // ============================================================
-// SÉLECTION DES OBJETS
+// SÉLECTION DES OBJETS & DASHBOARD
 // ============================================================
 function initDeviceSelection() {
     document.querySelectorAll('.device-card').forEach(card => {
@@ -298,15 +298,11 @@ function initDeviceSelection() {
         });
     });
 
-    document.getElementById('logoutBtn').addEventListener('click', logout);
     document.getElementById('adminBtn').addEventListener('click', () => {
         if (APP_STATE.isAdmin) showView('admin');
     });
 }
 
-// ============================================================
-// DASHBOARD IoT
-// ============================================================
 function initDashboard() {
     // Contrôle LED
     document.getElementById('ledOnBtn').addEventListener('click', () => {
@@ -332,9 +328,6 @@ function initDashboard() {
         stopSimulation();
         showView('selection');
     });
-
-    // Bouton Déconnexion
-    document.getElementById('logoutBtn2').addEventListener('click', logout);
 }
 
 // ============================================================
@@ -373,8 +366,6 @@ function initAdmin() {
     document.getElementById('backAdminBtn').addEventListener('click', () => {
         showView('selection');
     });
-
-    document.getElementById('logoutBtn3').addEventListener('click', logout);
 }
 
 // ============================================================
@@ -397,7 +388,7 @@ function refreshLogs() {
 }
 
 // ============================================================
-// DÉCONNEXION
+// DÉCONNEXION CENTRALISÉE
 // ============================================================
 function logout() {
     stopSimulation();
@@ -423,6 +414,11 @@ document.addEventListener('DOMContentLoaded', () => {
     initDeviceSelection();
     initDashboard();
     initAdmin();
+    
+    // Bouton logout centralisé (un seul pour les 3 vues)
+    document.querySelectorAll('#logoutBtn').forEach(btn => {
+        btn.addEventListener('click', logout);
+    });
     
     // Afficher la vue d'authentification par défaut
     showView('auth');
