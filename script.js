@@ -1,5 +1,5 @@
 // ============================================================
-// CONFIGURATION GLOBALE
+// CONFIGURATION
 // ============================================================
 const CONFIG = {
     MQTT_BROKER: 'wss://test.mosquitto.org:8081',
@@ -8,421 +8,513 @@ const CONFIG = {
         TEMP: 'iot/device/temperature',
         COMMAND: 'iot/device/command'
     },
-    SIMULATION_INTERVAL: 5000 // 5 secondes
+    SIMULATION_INTERVAL: 5000,
+    ADMIN_CREDS: { username: 'admin', password: 'admin123' }
 };
 
 // ============================================================
-// ÉTAT GLOBAL DE L'APPLICATION
+// ÉTAT GLOBAL
 // ============================================================
-const APP_STATE = {
-    currentView: 'auth',
-    currentUser: null,
-    currentDevice: null,
+const STATE = {
+    user: null,
     isAdmin: false,
+    currentDevice: null,
     simulationActive: true,
-    mqttClient: null,
-    simulationTimer: null,
+    mqttConnected: false,
     logs: []
 };
 
 // ============================================================
-// GESTION DU localStorage (Simulation BDD)
+// STORAGE MANAGER (localStorage)
 // ============================================================
-class StorageManager {
-    // Initialiser le localStorage avec des données par défaut
+class Storage {
+    static KEY_USERS = 'app:users';
+    static KEY_LOGS = 'app:logs';
+
     static init() {
-        if (!localStorage.getItem('users')) {
-            localStorage.setItem('users', JSON.stringify([]));
-        }
-        if (!localStorage.getItem('mqtt_logs')) {
-            localStorage.setItem('mqtt_logs', JSON.stringify([]));
-        }
+        if (!localStorage.getItem(this.KEY_USERS)) localStorage.setItem(this.KEY_USERS, JSON.stringify([]));
+        if (!localStorage.getItem(this.KEY_LOGS)) localStorage.setItem(this.KEY_LOGS, JSON.stringify([]));
     }
 
-    // Récupérer tous les utilisateurs
     static getUsers() {
-        return JSON.parse(localStorage.getItem('users')) || [];
+        return JSON.parse(localStorage.getItem(this.KEY_USERS)) || [];
     }
 
-    // Ajouter un nouvel utilisateur
     static addUser(email, username, password) {
         const users = this.getUsers();
         if (users.some(u => u.email === email || u.username === username)) {
-            return { success: false, message: 'Email ou pseudo déjà utilisé' };
+            return { ok: false, msg: 'Email ou pseudo déjà utilisé' };
         }
         users.push({ email, username, password });
-        localStorage.setItem('users', JSON.stringify(users));
-        return { success: true, message: 'Utilisateur créé avec succès' };
+        localStorage.setItem(this.KEY_USERS, JSON.stringify(users));
+        return { ok: true, msg: 'Utilisateur créé' };
     }
 
-    // Vérifier l'authentification
-    static authenticate(userInput, password) {
-        const users = this.getUsers();
-        const user = users.find(u => (u.email === userInput || u.username === userInput) && u.password === password);
-        return user || null;
+    static authenticate(input, password) {
+        return this.getUsers().find(u => (u.email === input || u.username === input) && u.password === password) || null;
     }
 
-    // Supprimer un utilisateur
     static deleteUser(email) {
         let users = this.getUsers();
         users = users.filter(u => u.email !== email);
-        localStorage.setItem('users', JSON.stringify(users));
+        localStorage.setItem(this.KEY_USERS, JSON.stringify(users));
     }
 
-    // Ajouter un log MQTT
-    static addLog(message) {
-        const logs = JSON.parse(localStorage.getItem('mqtt_logs')) || [];
-        const timestamp = new Date().toLocaleTimeString('fr-FR');
-        logs.unshift({ message, timestamp });
-        // Garder seulement les 50 derniers logs
+    static addLog(msg) {
+        const logs = JSON.parse(localStorage.getItem(this.KEY_LOGS)) || [];
+        logs.unshift({ msg, time: new Date().toLocaleTimeString('fr-FR') });
         if (logs.length > 50) logs.pop();
-        localStorage.setItem('mqtt_logs', JSON.stringify(logs));
-        APP_STATE.logs = logs;
+        localStorage.setItem(this.KEY_LOGS, JSON.stringify(logs));
+        STATE.logs = logs;
     }
 
-    // Récupérer les logs
     static getLogs() {
-        return JSON.parse(localStorage.getItem('mqtt_logs')) || [];
+        return JSON.parse(localStorage.getItem(this.KEY_LOGS)) || [];
     }
 }
 
 // ============================================================
-// GESTION MQTT
+// MQTT MANAGER
 // ============================================================
-class MQTTManager {
+class MQTT {
     static connect() {
         try {
-            const clientId = `web_client_${Date.now()}`;
-            APP_STATE.mqttClient = new Paho.MQTT.Client(CONFIG.MQTT_BROKER, 8081, clientId);
+            STATE.mqttClient = new Paho.MQTT.Client(CONFIG.MQTT_BROKER, 8081, `web_${Date.now()}`);
             
-            APP_STATE.mqttClient.onConnectionLost = () => {
-                console.log('Connexion MQTT perdue');
-                StorageManager.addLog('❌ Connexion MQTT perdue');
+            STATE.mqttClient.onConnectionLost = () => {
+                console.log('❌ MQTT connexion perdue');
+                STATE.mqttConnected = false;
+                Storage.addLog('❌ Connexion MQTT perdue');
             };
 
-            APP_STATE.mqttClient.onMessageArrived = (message) => {
-                this.handleMessage(message);
-            };
+            STATE.mqttClient.onMessageArrived = msg => this.handleMessage(msg);
 
-            APP_STATE.mqttClient.connect({
+            STATE.mqttClient.connect({
                 onSuccess: () => {
-                    console.log('Connecté au broker MQTT');
-                    StorageManager.addLog('✅ Connecté au broker MQTT');
-                    APP_STATE.mqttClient.subscribe(CONFIG.MQTT_TOPICS.TEMP);
+                    STATE.mqttConnected = true;
+                    console.log('✅ Connecté MQTT');
+                    Storage.addLog('✅ Connecté au broker MQTT');
+                    STATE.mqttClient.subscribe(CONFIG.MQTT_TOPICS.TEMP);
                 },
                 onFailure: () => {
-                    console.log('Broker MQTT indisponible');
-                    StorageManager.addLog('⚠️ Mode simulation activé (Pas de broker)');
+                    console.log('⚠️ Broker indisponible');
+                    Storage.addLog('⚠️ Mode simulation (pas de broker)');
                 }
             });
-        } catch (error) {
-            console.log('MQTT non disponible, mode simulation', error);
-            StorageManager.addLog('⚠️ Mode simulation activé');
+        } catch (e) {
+            console.log('MQTT non disponible:', e);
+            Storage.addLog('⚠️ Mode simulation activé');
         }
     }
 
-    static publish(topic, message) {
-        if (APP_STATE.mqttClient && APP_STATE.mqttClient.isConnected()) {
-            const msg = new Paho.MQTT.Message(message);
-            msg.destinationName = topic;
-            APP_STATE.mqttClient.send(msg);
+    static publish(topic, msg) {
+        if (STATE.mqttClient?.isConnected?.()) {
+            const m = new Paho.MQTT.Message(msg);
+            m.destinationName = topic;
+            STATE.mqttClient.send(m);
         }
-        StorageManager.addLog(`📤 [${topic}] ${message}`);
+        Storage.addLog(`📤 [${topic}] ${msg}`);
     }
 
     static handleMessage(message) {
         const topic = message.destinationName;
         const payload = message.payloadString;
-        StorageManager.addLog(`📥 [${topic}] ${payload}`);
-        
-        if (topic === CONFIG.MQTT_TOPICS.TEMP) {
-            updateTemperatureGauge(parseFloat(payload));
-        }
+        Storage.addLog(`📥 [${topic}] ${payload}`);
+        if (topic === CONFIG.MQTT_TOPICS.TEMP) updateTempGauge(parseFloat(payload));
     }
 }
 
 // ============================================================
-// SIMULATION IoT
+// SIMULATION
 // ============================================================
+let simulationTimer;
+
 function startSimulation() {
-    if (APP_STATE.simulationTimer) clearInterval(APP_STATE.simulationTimer);
-    
-    APP_STATE.simulationTimer = setInterval(() => {
-        if (!APP_STATE.simulationActive) return;
-
-        // Simuler température (15-35°C)
-        const tempValue = (Math.random() * 20 + 15).toFixed(1);
-        updateTemperatureGauge(tempValue);
-        StorageManager.addLog(`🤖 Température simulée: ${tempValue}°C`);
-
-        // Simuler un message de capteur
-        MQTTManager.publish(CONFIG.MQTT_TOPICS.TEMP, tempValue);
+    if (simulationTimer) clearInterval(simulationTimer);
+    simulationTimer = setInterval(() => {
+        if (!STATE.simulationActive) return;
+        const temp = (Math.random() * 20 + 15).toFixed(1);
+        updateTempGauge(temp);
+        MQTT.publish(CONFIG.MQTT_TOPICS.TEMP, temp);
     }, CONFIG.SIMULATION_INTERVAL);
 }
 
 function stopSimulation() {
-    if (APP_STATE.simulationTimer) {
-        clearInterval(APP_STATE.simulationTimer);
-        APP_STATE.simulationTimer = null;
-    }
+    if (simulationTimer) clearInterval(simulationTimer);
 }
 
-// ============================================================
-// MISE À JOUR UI - JAUGE TEMPÉRATURE
-// ============================================================
-function updateTemperatureGauge(value) {
-    const percentage = Math.max(0, Math.min(100, (value - 15) / 20 * 100));
-    document.getElementById('tempGauge').style.height = percentage + '%';
-    document.getElementById('tempValue').textContent = value + '°C';
+function updateTempGauge(value) {
+    const pct = Math.max(0, Math.min(100, (value - 15) / 20 * 100));
+    const gauge = document.getElementById('tempGauge');
+    const display = document.getElementById('tempValue');
+    const status = document.getElementById('tempStatus');
     
-    let status = '🔵 Température normale';
-    if (value < 18) status = '❄️ Froid';
-    else if (value > 28) status = '🔥 Chaud';
+    if (!gauge) return;
+    gauge.style.height = pct + '%';
+    display.textContent = value + '°C';
+    status.textContent = value < 18 ? '❄️ Froid' : value > 28 ? '🔥 Chaud' : '🔵 Normal';
+}
+
+// ============================================================
+// ROUTEUR & NAVIGATION
+// ============================================================
+const VIEWS = {};
+
+function registerView(name, template, handlers = {}) {
+    VIEWS[name] = { template, handlers };
+}
+
+function goTo(viewName) {
+    const app = document.getElementById('app');
+    const view = VIEWS[viewName];
+    if (!view) return console.error(`Vue ${viewName} non trouvée`);
+
+    app.innerHTML = view.template();
     
-    document.getElementById('tempStatus').textContent = status;
+    if (viewName === 'dashboard') startSimulation();
+    else stopSimulation();
+
+    // Attacher les handlers
+    Object.entries(view.handlers).forEach(([selector, handler]) => {
+        document.addEventListener('click', e => {
+            if (e.target.matches(selector)) handler(e);
+        });
+    });
+
+    // Handlers spécifiques
+    if (viewName === 'dashboard') attachDashboardHandlers();
+    else if (viewName === 'admin') populateAdminTable();
+    else if (viewName === 'selection') attachSelectionHandlers();
+    else if (viewName === 'auth') attachAuthHandlers();
 }
 
 // ============================================================
-// SYSTÈME DE NAVIGATION
+// TEMPLATES DES VUES
 // ============================================================
-function showView(viewName) {
-    // Masquer toutes les vues
-    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-    
-    // Afficher la vue demandée
-    document.getElementById(viewName + 'View').classList.add('active');
-    APP_STATE.currentView = viewName;
 
-    // Actions spécifiques par vue
-    if (viewName === 'dashboard') {
-        startSimulation();
-        refreshLogs();
-    } else if (viewName === 'admin') {
-        populateAdminTable();
-    } else {
-        stopSimulation();
-    }
-}
+// VUE: AUTHENTIFICATION
+registerView('auth', () => `
+    <div class="auth-container">
+        <div class="auth-header">
+            <h1>🌐 IoT Dashboard</h1>
+            <p>Gestion IoT via MQTT</p>
+        </div>
+        
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="login">Connexion</button>
+            <button class="tab-btn" data-tab="register">Inscription</button>
+        </div>
 
-function navigateToDevice(deviceName) {
-    APP_STATE.currentDevice = deviceName;
-    document.getElementById('deviceTitle').textContent = `Dashboard - ${deviceName.charAt(0).toUpperCase() + deviceName.slice(1)}`;
-    showView('dashboard');
-}
+        <div id="loginTab" class="tab-content active">
+            <form id="loginForm">
+                <div class="form-group">
+                    <label>Identifiant</label>
+                    <input type="text" id="loginUser" placeholder="Email ou pseudo" required>
+                </div>
+                <div class="form-group">
+                    <label>Mot de passe</label>
+                    <input type="password" id="loginPass" placeholder="Mot de passe" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Se connecter</button>
+                <div id="loginError" class="error-msg"></div>
+            </form>
+        </div>
+
+        <div id="registerTab" class="tab-content">
+            <form id="registerForm">
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="registerEmail" placeholder="votre@email.com" required>
+                </div>
+                <div class="form-group">
+                    <label>Nom d'utilisateur</label>
+                    <input type="text" id="registerUser" placeholder="pseudo" required>
+                </div>
+                <div class="form-group">
+                    <label>Mot de passe</label>
+                    <input type="password" id="registerPass" placeholder="Min 6 caractères" required>
+                </div>
+                <button type="submit" class="btn btn-primary">S'inscrire</button>
+                <div id="registerError" class="error-msg"></div>
+                <div id="registerSuccess" class="success-msg"></div>
+            </form>
+        </div>
+    </div>
+`);
+
+// VUE: SÉLECTION APPAREILS
+registerView('selection', () => `
+    <div class="header">
+        <h2>Sélectionnez un capteur</h2>
+        <div class="header-right">
+            <span class="user-info">👤 ${STATE.user.username}</span>
+            <button class="btn btn-secondary btn-logout">Déconnexion</button>
+        </div>
+    </div>
+    <div class="container">
+        <div class="devices-grid">
+            <div class="device-card" data-device="salon">
+                <div class="device-icon">🌡️</div>
+                <h3>Capteur Salon</h3>
+                <p>Température & Humidité</p>
+                <span class="device-status">En ligne</span>
+            </div>
+            <div class="device-card" data-device="cuisine">
+                <div class="device-icon">🍳</div>
+                <h3>Capteur Cuisine</h3>
+                <p>Qualité de l'air</p>
+                <span class="device-status">En ligne</span>
+            </div>
+            <div class="device-card" data-device="garage">
+                <div class="device-icon">🚗</div>
+                <h3>Garage</h3>
+                <p>Détecteur de mouvement</p>
+                <span class="device-status">En ligne</span>
+            </div>
+            <div class="device-card" data-device="chambre">
+                <div class="device-icon">🛏️</div>
+                <h3>Capteur Chambre</h3>
+                <p>Température & Luminosité</p>
+                <span class="device-status">En ligne</span>
+            </div>
+        </div>
+        ${STATE.isAdmin ? `
+            <div style="text-align: center; margin-top: 30px;">
+                <button class="btn btn-danger btn-admin">🔒 Accès Administration</button>
+            </div>
+        ` : ''}
+    </div>
+`);
+
+// VUE: DASHBOARD
+registerView('dashboard', () => `
+    <div class="header">
+        <button class="btn btn-secondary btn-back">← Retour</button>
+        <h2 id="deviceTitle">Dashboard - ${STATE.currentDevice.charAt(0).toUpperCase() + STATE.currentDevice.slice(1)}</h2>
+        <div class="header-right">
+            <button class="btn btn-secondary btn-logout">Déconnexion</button>
+        </div>
+    </div>
+    <div class="container">
+        <div class="dashboard-container">
+            <div class="control-card">
+                <h3>💡 Contrôle LED</h3>
+                <div class="control-content">
+                    <p>État : <span id="ledStatus">Éteinte</span></p>
+                    <div class="button-group">
+                        <button class="btn btn-success btn-led-on">Allumer</button>
+                        <button class="btn btn-danger btn-led-off">Éteindre</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="control-card">
+                <h3>🌡️ Température</h3>
+                <div class="control-content">
+                    <div class="gauge">
+                        <div class="gauge-fill" id="tempGauge"></div>
+                        <span id="tempValue">--°C</span>
+                    </div>
+                    <p id="tempStatus">En attente...</p>
+                </div>
+            </div>
+
+            <div class="control-card">
+                <h3>⚙️ Mode Simulation</h3>
+                <div class="control-content">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="simulationToggle" ${STATE.simulationActive ? 'checked' : ''}>
+                        <span class="slider"></span>
+                    </label>
+                    <p id="simulationStatus">${STATE.simulationActive ? '✅ Activée' : '⏸️ Désactivée'}</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="logs-container">
+            <h3>📋 Logs d'activité</h3>
+            <div class="logs-list" id="logsList">
+                ${STATE.logs.length === 0 ? '<p class="no-logs">Aucun log</p>' : STATE.logs.map(l => `
+                    <div class="log-item"><strong>${l.time}</strong> - ${l.msg}</div>
+                `).join('')}
+            </div>
+        </div>
+    </div>
+`);
+
+// VUE: ADMINISTRATION
+registerView('admin', () => `
+    <div class="header">
+        <button class="btn btn-secondary btn-back">← Retour</button>
+        <h2>🔒 Panneau Administration</h2>
+        <div class="header-right">
+            <button class="btn btn-secondary btn-logout">Déconnexion</button>
+        </div>
+    </div>
+    <div class="container">
+        <div class="admin-container">
+            <h3>Utilisateurs inscrits (${Storage.getUsers().length})</h3>
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>Email</th>
+                        <th>Pseudo</th>
+                        <th>Mot de passe</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="usersTableBody">
+                    <tr><td colspan="4" class="no-data">Aucun utilisateur</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+`);
 
 // ============================================================
-// AUTHENTIFICATION
+// HANDLERS SPÉCIFIQUES
 // ============================================================
-function initAuthListeners() {
-    // Système d'onglets
+
+function attachAuthHandlers() {
+    // Onglets
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            const tabName = btn.dataset.tab;
-            
-            // Mettre à jour les boutons
+            const tab = btn.dataset.tab;
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
             btn.classList.add('active');
-            
-            // Mettre à jour les contenus
-            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-            document.getElementById(tabName + 'Tab').classList.add('active');
+            document.getElementById(tab + 'Tab').classList.add('active');
         });
     });
 
     // Connexion
-    document.getElementById('loginForm').addEventListener('submit', (e) => {
+    document.getElementById('loginForm')?.addEventListener('submit', e => {
         e.preventDefault();
-        const userInput = document.getElementById('loginUser').value;
-        const password = document.getElementById('loginPass').value;
-        const errorDiv = document.getElementById('loginError');
+        const input = document.getElementById('loginUser').value;
+        const pass = document.getElementById('loginPass').value;
+        const err = document.getElementById('loginError');
 
-        const user = StorageManager.authenticate(userInput, password);
+        const user = Storage.authenticate(input, pass);
         if (user) {
-            APP_STATE.currentUser = user.username;
-            APP_STATE.isAdmin = (user.username === 'admin' && user.password === 'admin123');
-            
-            if (APP_STATE.isAdmin) {
-                document.getElementById('adminPanel').style.display = 'block';
-            }
-            
-            StorageManager.addLog(`👤 ${user.username} connecté`);
-            MQTTManager.connect();
-            document.getElementById('currentUser').textContent = user.username;
-            showView('selection');
+            STATE.user = user;
+            STATE.isAdmin = user.username === CONFIG.ADMIN_CREDS.username && user.password === CONFIG.ADMIN_CREDS.password;
+            Storage.addLog(`👤 ${user.username} connecté`);
+            MQTT.connect();
+            goTo('selection');
         } else {
-            errorDiv.textContent = '❌ Identifiants incorrects';
-            errorDiv.classList.add('show');
-            setTimeout(() => errorDiv.classList.remove('show'), 3000);
+            err.textContent = '❌ Identifiants incorrects';
+            err.classList.add('show');
+            setTimeout(() => err.classList.remove('show'), 3000);
         }
     });
 
     // Inscription
-    document.getElementById('registerForm').addEventListener('submit', (e) => {
+    document.getElementById('registerForm')?.addEventListener('submit', e => {
         e.preventDefault();
         const email = document.getElementById('registerEmail').value;
-        const username = document.getElementById('registerUser').value;
-        const password = document.getElementById('registerPass').value;
-        const errorDiv = document.getElementById('registerError');
-        const successDiv = document.getElementById('registerSuccess');
+        const user = document.getElementById('registerUser').value;
+        const pass = document.getElementById('registerPass').value;
+        const err = document.getElementById('registerError');
+        const suc = document.getElementById('registerSuccess');
 
-        if (password.length < 6) {
-            errorDiv.textContent = '❌ Le mot de passe doit contenir au moins 6 caractères';
-            errorDiv.classList.add('show');
+        if (pass.length < 6) {
+            err.textContent = '❌ Min 6 caractères';
+            err.classList.add('show');
             return;
         }
 
-        const result = StorageManager.addUser(email, username, password);
-        if (result.success) {
-            successDiv.textContent = '✅ ' + result.message + ' ! Vous pouvez vous connecter.';
-            successDiv.classList.add('show');
-            document.getElementById('registerForm').reset();
+        const res = Storage.addUser(email, user, pass);
+        if (res.ok) {
+            suc.textContent = '✅ ' + res.msg + ' !';
+            suc.classList.add('show');
             setTimeout(() => {
-                successDiv.classList.remove('show');
                 document.querySelector('[data-tab="login"]').click();
-            }, 2000);
+                e.target.reset();
+            }, 1500);
         } else {
-            errorDiv.textContent = '❌ ' + result.message;
-            errorDiv.classList.add('show');
+            err.textContent = '❌ ' + res.msg;
+            err.classList.add('show');
         }
     });
 }
 
-// ============================================================
-// SÉLECTION DES OBJETS & DASHBOARD
-// ============================================================
-function initDeviceSelection() {
+function attachSelectionHandlers() {
     document.querySelectorAll('.device-card').forEach(card => {
         card.addEventListener('click', () => {
-            const deviceName = card.dataset.device;
-            navigateToDevice(deviceName);
+            STATE.currentDevice = card.dataset.device;
+            goTo('dashboard');
         });
     });
 
-    document.getElementById('adminBtn').addEventListener('click', () => {
-        if (APP_STATE.isAdmin) showView('admin');
-    });
+    document.querySelector('.btn-admin')?.addEventListener('click', () => goTo('admin'));
 }
 
-function initDashboard() {
-    // Contrôle LED
-    document.getElementById('ledOnBtn').addEventListener('click', () => {
+function attachDashboardHandlers() {
+    document.querySelector('.btn-back')?.addEventListener('click', () => goTo('selection'));
+    
+    document.querySelector('.btn-led-on')?.addEventListener('click', () => {
         document.getElementById('ledStatus').textContent = 'Allumée 🟢';
-        MQTTManager.publish(CONFIG.MQTT_TOPICS.LED, 'ON');
-        StorageManager.addLog('💡 LED allumée');
+        MQTT.publish(CONFIG.MQTT_TOPICS.LED, 'ON');
+        Storage.addLog('💡 LED allumée');
     });
 
-    document.getElementById('ledOffBtn').addEventListener('click', () => {
+    document.querySelector('.btn-led-off')?.addEventListener('click', () => {
         document.getElementById('ledStatus').textContent = 'Éteinte 🔴';
-        MQTTManager.publish(CONFIG.MQTT_TOPICS.LED, 'OFF');
-        StorageManager.addLog('💡 LED éteinte');
+        MQTT.publish(CONFIG.MQTT_TOPICS.LED, 'OFF');
+        Storage.addLog('💡 LED éteinte');
     });
 
-    // Toggle Simulation
-    document.getElementById('simulationToggle').addEventListener('change', (e) => {
-        APP_STATE.simulationActive = e.target.checked;
-        document.getElementById('simulationStatus').textContent = e.target.checked ? '✅ Simulation activée' : '⏸️ Simulation désactivée';
-    });
-
-    // Bouton Retour
-    document.getElementById('backBtn').addEventListener('click', () => {
-        stopSimulation();
-        showView('selection');
+    document.getElementById('simulationToggle')?.addEventListener('change', e => {
+        STATE.simulationActive = e.target.checked;
+        document.getElementById('simulationStatus').textContent = e.target.checked ? '✅ Activée' : '⏸️ Désactivée';
     });
 }
 
-// ============================================================
-// PANNEAU ADMINISTRATION
-// ============================================================
 function populateAdminTable() {
-    const users = StorageManager.getUsers();
     const tbody = document.getElementById('usersTableBody');
+    const users = Storage.getUsers();
     
     if (users.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="no-data">Aucun utilisateur inscrit</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" class="no-data">Aucun utilisateur</td></tr>';
         return;
     }
 
-    tbody.innerHTML = users.map((user, index) => `
+    tbody.innerHTML = users.map(u => `
         <tr>
-            <td>${user.email}</td>
-            <td>${user.username}</td>
+            <td>${u.email}</td>
+            <td>${u.username}</td>
             <td>••••••</td>
-            <td>
-                <button class="btn-delete" onclick="deleteUserFromAdmin('${user.email}')">Supprimer</button>
-            </td>
+            <td><button class="btn-delete" onclick="deleteUser('${u.email}')">Supprimer</button></td>
         </tr>
     `).join('');
 }
 
-function deleteUserFromAdmin(email) {
-    if (confirm('Êtes-vous sûr de vouloir supprimer cet utilisateur ?')) {
-        StorageManager.deleteUser(email);
-        StorageManager.addLog(`🗑️ Utilisateur ${email} supprimé`);
-        populateAdminTable();
+function deleteUser(email) {
+    if (!confirm('Supprimer cet utilisateur ?')) return;
+    Storage.deleteUser(email);
+    Storage.addLog(`🗑️ ${email} supprimé`);
+    populateAdminTable();
+}
+
+// ============================================================
+// LOGOUT CENTRALISÉ
+// ============================================================
+document.addEventListener('click', e => {
+    if (e.target.classList.contains('btn-logout')) {
+        stopSimulation();
+        STATE.user = null;
+        STATE.isAdmin = false;
+        STATE.currentDevice = null;
+        goTo('auth');
     }
-}
-
-function initAdmin() {
-    document.getElementById('backAdminBtn').addEventListener('click', () => {
-        showView('selection');
-    });
-}
+});
 
 // ============================================================
-// RAFRAÎCHISSEMENT DES LOGS
-// ============================================================
-function refreshLogs() {
-    const logs = StorageManager.getLogs();
-    const logsList = document.getElementById('logsList');
-
-    if (logs.length === 0) {
-        logsList.innerHTML = '<p class="no-logs">Aucun log pour le moment</p>';
-        return;
-    }
-
-    logsList.innerHTML = logs.map(log => `
-        <div class="log-item">
-            <strong>${log.timestamp}</strong> - ${log.message}
-        </div>
-    `).join('');
-}
-
-// ============================================================
-// DÉCONNEXION CENTRALISÉE
-// ============================================================
-function logout() {
-    stopSimulation();
-    APP_STATE.currentUser = null;
-    APP_STATE.isAdmin = false;
-    APP_STATE.currentDevice = null;
-    document.getElementById('adminPanel').style.display = 'none';
-    document.getElementById('loginForm').reset();
-    document.getElementById('registerForm').reset();
-    document.querySelector('[data-tab="login"]').click();
-    showView('auth');
-}
-
-// ============================================================
-// INITIALISATION DE L'APPLICATION
+// INITIALISATION
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
-    // Initialiser le localStorage
-    StorageManager.init();
-    
-    // Initialiser les listeners
-    initAuthListeners();
-    initDeviceSelection();
-    initDashboard();
-    initAdmin();
-    
-    // Bouton logout centralisé (un seul pour les 3 vues)
-    document.querySelectorAll('#logoutBtn').forEach(btn => {
-        btn.addEventListener('click', logout);
-    });
-    
-    // Afficher la vue d'authentification par défaut
-    showView('auth');
-    
-    console.log('✅ Application IoT MQTT SPA initialisée');
-    StorageManager.addLog('✅ Application démarrée');
+    Storage.init();
+    STATE.logs = Storage.getLogs();
+    goTo('auth');
+    console.log('✅ SPA initialisée');
 });
