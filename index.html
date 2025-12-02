@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IoT Dashboard MQTT - SPA</title>
+    <script src="https://cdn.jsdelivr.net/npm/paho-mqtt@1.0.1/paho-mqtt.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- VUE 1: AUTHENTIFICATION -->
+    <div id="authView" class="view active">
+        <div class="auth-container">
+            <div class="auth-header">
+                <h1>🌐 IoT Dashboard</h1>
+                <p>Gestion IoT via MQTT</p>
+            </div>
+            
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="login">Connexion</button>
+                <button class="tab-btn" data-tab="register">Inscription</button>
+            </div>
+
+            <!-- TAB: Connexion -->
+            <div id="loginTab" class="tab-content active">
+                <form id="loginForm">
+                    <div class="form-group">
+                        <label>Identifiant (Email ou Pseudo)</label>
+                        <input type="text" id="loginUser" placeholder="Entrez votre email ou pseudo" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Mot de passe</label>
+                        <input type="password" id="loginPass" placeholder="Mot de passe" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Se connecter</button>
+                    <div id="loginError" class="error-msg"></div>
+                </form>
+            </div>
+
+            <!-- TAB: Inscription -->
+            <div id="registerTab" class="tab-content">
+                <form id="registerForm">
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" id="registerEmail" placeholder="votre@email.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Nom d'utilisateur</label>
+                        <input type="text" id="registerUser" placeholder="pseudo" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Mot de passe</label>
+                        <input type="password" id="registerPass" placeholder="Minimum 6 caractères" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">S'inscrire</button>
+                    <div id="registerError" class="error-msg"></div>
+                    <div id="registerSuccess" class="success-msg"></div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- VUE 2: SÉLECTION DES OBJETS -->
+    <div id="selectionView" class="view">
+        <div class="header">
+            <h2>Sélectionnez un capteur</h2>
+            <div class="header-right">
+                <span class="user-info">👤 <span id="currentUser"></span></span>
+                <button class="btn btn-secondary" id="logoutBtn">Déconnexion</button>
+            </div>
+        </div>
+
+        <div class="devices-grid">
+            <div class="device-card" data-device="salon">
+                <div class="device-icon">🌡️</div>
+                <h3>Capteur Salon</h3>
+                <p>Température & Humidité</p>
+                <span class="device-status">En ligne</span>
+            </div>
+            <div class="device-card" data-device="cuisine">
+                <div class="device-icon">🍳</div>
+                <h3>Capteur Cuisine</h3>
+                <p>Qualité de l'air</p>
+                <span class="device-status">En ligne</span>
+            </div>
+            <div class="device-card" data-device="garage">
+                <div class="device-icon">🚗</div>
+                <h3>Garage</h3>
+                <p>Détecteur de mouvement</p>
+                <span class="device-status">En ligne</span>
+            </div>
+            <div class="device-card" data-device="chambre">
+                <div class="device-icon">🛏️</div>
+                <h3>Capteur Chambre</h3>
+                <p>Température & Luminosité</p>
+                <span class="device-status">En ligne</span>
+            </div>
+        </div>
+
+        <!-- Bouton Admin visible uniquement pour admin -->
+        <div id="adminPanel" style="display:none; margin-top:30px;">
+            <button class="btn btn-danger" id="adminBtn">🔒 Accès Administration</button>
+        </div>
+    </div>
+
+    <!-- VUE 3: DASHBOARD IoT -->
+    <div id="dashboardView" class="view">
+        <div class="dashboard-header">
+            <button class="btn btn-secondary" id="backBtn">← Retour</button>
+            <h2 id="deviceTitle">Dashboard</h2>
+            <button class="btn btn-secondary" id="logoutBtn2">Déconnexion</button>
+        </div>
+
+        <div class="dashboard-container">
+            <!-- Contrôle LED -->
+            <div class="control-card">
+                <h3>💡 Contrôle LED</h3>
+                <div class="control-content">
+                    <p>État : <span id="ledStatus">Éteinte</span></p>
+                    <div class="button-group">
+                        <button class="btn btn-success" id="ledOnBtn">Allumer</button>
+                        <button class="btn btn-danger" id="ledOffBtn">Éteindre</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Capteur Température -->
+            <div class="control-card">
+                <h3>🌡️ Température</h3>
+                <div class="control-content">
+                    <div class="gauge">
+                        <div class="gauge-fill" id="tempGauge"></div>
+                        <span id="tempValue">--°C</span>
+                    </div>
+                    <p id="tempStatus">En attente de données...</p>
+                </div>
+            </div>
+
+            <!-- Mode Simulation -->
+            <div class="control-card">
+                <h3>⚙️ Mode Simulation</h3>
+                <div class="control-content">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="simulationToggle" checked>
+                        <span class="slider"></span>
+                    </label>
+                    <p id="simulationStatus">Simulation activée</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Logs MQTT -->
+        <div class="logs-container">
+            <h3>📋 Logs d'activité</h3>
+            <div id="logsList" class="logs-list">
+                <p class="no-logs">Aucun log pour le moment</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- VUE 4: ADMINISTRATION -->
+    <div id="adminView" class="view">
+        <div class="admin-header">
+            <button class="btn btn-secondary" id="backAdminBtn">← Retour</button>
+            <h2>🔒 Panneau Administration</h2>
+            <button class="btn btn-secondary" id="logoutBtn3">Déconnexion</button>
+        </div>
+
+        <div class="admin-container">
+            <h3>Utilisateurs inscrits</h3>
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>Email</th>
+                        <th>Nom d'utilisateur</th>
+                        <th>Mot de passe</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="usersTableBody">
+                    <tr>
+                        <td colspan="4" class="no-data">Aucun utilisateur</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

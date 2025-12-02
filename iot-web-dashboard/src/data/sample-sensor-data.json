@@ -1,0 +1,46 @@
+{
+  "temperature": [
+    {
+      "timestamp": "2023-10-01T10:00:00Z",
+      "value": 22.5
+    },
+    {
+      "timestamp": "2023-10-01T10:05:00Z",
+      "value": 23.0
+    },
+    {
+      "timestamp": "2023-10-01T10:10:00Z",
+      "value": 21.8
+    },
+    {
+      "timestamp": "2023-10-01T10:15:00Z",
+      "value": 24.1
+    },
+    {
+      "timestamp": "2023-10-01T10:20:00Z",
+      "value": 22.9
+    }
+  ],
+  "ledStatus": [
+    {
+      "timestamp": "2023-10-01T10:00:00Z",
+      "status": "OFF"
+    },
+    {
+      "timestamp": "2023-10-01T10:05:00Z",
+      "status": "ON"
+    },
+    {
+      "timestamp": "2023-10-01T10:10:00Z",
+      "status": "OFF"
+    },
+    {
+      "timestamp": "2023-10-01T10:15:00Z",
+      "status": "ON"
+    },
+    {
+      "timestamp": "2023-10-01T10:20:00Z",
+      "status": "OFF"
+    }
+  ]
+}
