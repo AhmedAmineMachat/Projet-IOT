@@ -34,6 +34,18 @@ class Storage {
     static init() {
         if (!localStorage.getItem(this.KEY_USERS)) localStorage.setItem(this.KEY_USERS, JSON.stringify([]));
         if (!localStorage.getItem(this.KEY_LOGS)) localStorage.setItem(this.KEY_LOGS, JSON.stringify([]));
+        const users = this.getUsers();
+        const adminExists = users.some(u => u.username === CONFIG.ADMIN_CREDS.username);
+
+        if (!adminExists) {
+            users.push({
+                email: 'admin@system.iot',
+                username: CONFIG.ADMIN_CREDS.username,
+                password: CONFIG.ADMIN_CREDS.password
+            });
+            localStorage.setItem(this.KEY_USERS, JSON.stringify(users));
+            console.log('👑 Compte Admin généré automatiquement');
+        }
     }
 
     static getUsers() {
@@ -183,7 +195,7 @@ function goTo(viewName) {
 
     // Handlers spécifiques
     if (viewName === 'dashboard') attachDashboardHandlers();
-    else if (viewName === 'admin') populateAdminTable();
+    else if (viewName === 'admin') attachAdminHandlers();
     else if (viewName === 'selection') attachSelectionHandlers();
     else if (viewName === 'auth') attachAuthHandlers();
 }
@@ -468,6 +480,11 @@ function attachDashboardHandlers() {
         STATE.simulationActive = e.target.checked;
         document.getElementById('simulationStatus').textContent = e.target.checked ? '✅ Activée' : '⏸️ Désactivée';
     });
+}
+
+// NOUVEAU: Handler pour l'admin
+function attachAdminHandlers() {
+    document.querySelector('.btn-back')?.addEventListener('click', () => goTo('selection'));
 }
 
 function populateAdminTable() {
