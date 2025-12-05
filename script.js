@@ -2,11 +2,14 @@
 // CONFIGURATION
 // ============================================================
 const CONFIG = {
-    MQTT_BROKER: 'wss://test.mosquitto.org:8081',
+    MQTT_HOST: 'test.mosquitto.org', 
+    MQTT_PORT: 8081,
+    
     MQTT_TOPICS: {
-        LED: 'iot/device/led',
-        TEMP: 'iot/device/temperature',
-        COMMAND: 'iot/device/command'
+        // Remets ici tes topics personnalisés (avec ton prénom/pseudo)
+        LED: 'projet_TP_IOT_2025/led',
+        TEMP: 'projet_TP_IOT_2025/temperature',
+        COMMAND: 'projet_TP_IOT_2025/command'
     },
     SIMULATION_INTERVAL: 5000,
     ADMIN_CREDS: { username: 'admin', password: 'admin123' }
@@ -73,11 +76,28 @@ class Storage {
     }
 
     static addLog(msg) {
+        
         const logs = JSON.parse(localStorage.getItem(this.KEY_LOGS)) || [];
-        logs.unshift({ msg, time: new Date().toLocaleTimeString('fr-FR') });
+        const time = new Date().toLocaleTimeString('fr-FR');
+        logs.unshift({ msg, time });
         if (logs.length > 50) logs.pop();
         localStorage.setItem(this.KEY_LOGS, JSON.stringify(logs));
         STATE.logs = logs;
+
+        const logsList = document.getElementById('logsList');
+        if (logsList) {
+            
+            const emptyMsg = logsList.querySelector('.no-logs');
+            if (emptyMsg) emptyMsg.remove();
+
+            const newLogDiv = document.createElement('div');
+            newLogDiv.className = 'log-item';
+            
+            newLogDiv.style.animation = 'fadeIn 0.5s'; 
+            newLogDiv.innerHTML = `<strong>${time}</strong> - ${msg}`;
+
+            logsList.prepend(newLogDiv);
+        }
     }
 
     static getLogs() {
@@ -91,10 +111,16 @@ class Storage {
 class MQTT {
     static connect() {
         try {
-            STATE.mqttClient = new Paho.MQTT.Client(CONFIG.MQTT_BROKER, 8081, `web_${Date.now()}`);
+            console.log(`⏳ Tentative de connexion à ${CONFIG.MQTT_HOST}:${CONFIG.MQTT_PORT}...`);
             
-            STATE.mqttClient.onConnectionLost = () => {
-                console.log('❌ MQTT connexion perdue');
+            STATE.mqttClient = new Paho.MQTT.Client(
+                CONFIG.MQTT_HOST, 
+                CONFIG.MQTT_PORT, 
+                `web_${Date.now()}` // ID unique
+            );
+            
+            STATE.mqttClient.onConnectionLost = (responseObject) => {
+                console.log('❌ MQTT connexion perdue:', responseObject.errorMessage);
                 STATE.mqttConnected = false;
                 Storage.addLog('❌ Connexion MQTT perdue');
             };
@@ -104,18 +130,21 @@ class MQTT {
             STATE.mqttClient.connect({
                 onSuccess: () => {
                     STATE.mqttConnected = true;
-                    console.log('✅ Connecté MQTT');
+                    console.log('✅ Connecté MQTT avec succès !');
                     Storage.addLog('✅ Connecté au broker MQTT');
+                    
+                    console.log(`Subscribing to: ${CONFIG.MQTT_TOPICS.TEMP}`);
                     STATE.mqttClient.subscribe(CONFIG.MQTT_TOPICS.TEMP);
                 },
-                onFailure: () => {
-                    console.log('⚠️ Broker indisponible');
-                    Storage.addLog('⚠️ Mode simulation (pas de broker)');
-                }
+                onFailure: (message) => {
+                    console.log('⚠️ Échec connexion:', message.errorMessage);
+                    Storage.addLog('⚠️ Erreur connexion: ' + message.errorMessage);
+                },
+                useSSL: true
             });
         } catch (e) {
-            console.log('MQTT non disponible:', e);
-            Storage.addLog('⚠️ Mode simulation activé');
+            console.log('Erreur critique MQTT:', e);
+            Storage.addLog('⚠️ Erreur critique du client MQTT');
         }
     }
 
