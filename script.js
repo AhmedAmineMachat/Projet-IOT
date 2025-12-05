@@ -6,7 +6,6 @@ const CONFIG = {
     MQTT_PORT: 8081,
     
     MQTT_TOPICS: {
-        // Remets ici tes topics personnalisés (avec ton prénom/pseudo)
         LED: 'projet_TP_IOT_2025/led',
         TEMP: 'projet_TP_IOT_2025/temperature',
         COMMAND: 'projet_TP_IOT_2025/command'
