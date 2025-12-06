@@ -68,6 +68,10 @@ class Storage {
         return this.getUsers().find(u => (u.email === input || u.username === input) && u.password === password) || null;
     }
 
+    static userExists(input) {
+        return this.getUsers().find(u => u.email === input || u.username === input) || null;
+    }
+
     static deleteUser(email) {
         let users = this.getUsers();
         users = users.filter(u => u.email !== email);
@@ -236,7 +240,7 @@ function goTo(viewName) {
 registerView('auth', () => `
     <div class="auth-container">
         <div class="auth-header">
-            <h1>🌐 IoT Dashboard</h1>
+            <h1>🌐 Projet IOT</h1>
             <p>Gestion IoT via MQTT</p>
         </div>
         
@@ -442,7 +446,13 @@ function attachAuthHandlers() {
             MQTT.connect();
             goTo('selection');
         } else {
-            err.textContent = '❌ Identifiants incorrects';
+            // Vérifier si l'identifiant existe
+            const userExists = Storage.userExists(input);
+            if (userExists) {
+                err.textContent = '❌ Mot de passe incorrecte';
+            } else {
+                err.textContent = '❌ Identifiant inexistant';
+            }
             err.classList.add('show');
             setTimeout(() => err.classList.remove('show'), 3000);
         }
@@ -513,6 +523,7 @@ function attachDashboardHandlers() {
 // NOUVEAU: Handler pour l'admin
 function attachAdminHandlers() {
     document.querySelector('.btn-back')?.addEventListener('click', () => goTo('selection'));
+    populateAdminTable();
 }
 
 function populateAdminTable() {
