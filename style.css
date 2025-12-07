@@ -367,6 +367,7 @@ html, body {
     display: flex;
     gap: 10px;
     margin-top: 15px;
+    justify-content: center;
 }
 
 .button-group .btn {
@@ -445,6 +446,10 @@ html, body {
 
 .control-content {
     text-align: center;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 150px;
 }
 
 .gauge {
@@ -484,7 +489,7 @@ html, body {
     display: inline-block;
     width: 60px;
     height: 34px;
-    margin-bottom: 15px;
+    margin: 0 auto 15px;
 }
 
 .toggle-switch input {

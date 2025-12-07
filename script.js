@@ -32,6 +32,7 @@ const STATE = {
 class Storage {
     static KEY_USERS = 'app:users';
     static KEY_LOGS = 'app:logs';
+    static KEY_SESSION = 'app:session';
 
     static init() {
         if (!localStorage.getItem(this.KEY_USERS)) localStorage.setItem(this.KEY_USERS, JSON.stringify([]));
@@ -106,6 +107,19 @@ class Storage {
     static getLogs() {
         return JSON.parse(localStorage.getItem(this.KEY_LOGS)) || [];
     }
+
+    static saveSession(user, isAdmin) {
+        localStorage.setItem(this.KEY_SESSION, JSON.stringify({ user, isAdmin }));
+    }
+
+    static getSession() {
+        const session = localStorage.getItem(this.KEY_SESSION);
+        return session ? JSON.parse(session) : null;
+    }
+
+    static clearSession() {
+        localStorage.removeItem(this.KEY_SESSION);
+    }
 }
 
 // ============================================================
@@ -125,7 +139,7 @@ class MQTT {
             STATE.mqttClient.onConnectionLost = (responseObject) => {
                 console.log('❌ MQTT connexion perdue:', responseObject.errorMessage);
                 STATE.mqttConnected = false;
-                Storage.addLog('❌ Connexion MQTT perdue');
+                Storage.addLog('Connexion MQTT perdue');
             };
 
             STATE.mqttClient.onMessageArrived = msg => this.handleMessage(msg);
@@ -134,20 +148,20 @@ class MQTT {
                 onSuccess: () => {
                     STATE.mqttConnected = true;
                     console.log('✅ Connecté MQTT avec succès !');
-                    Storage.addLog('✅ Connecté au broker MQTT');
+                    Storage.addLog('Connecté au broker MQTT');
                     
                     console.log(`Subscribing to: ${CONFIG.MQTT_TOPICS.TEMP}`);
                     STATE.mqttClient.subscribe(CONFIG.MQTT_TOPICS.TEMP);
                 },
                 onFailure: (message) => {
                     console.log('⚠️ Échec connexion:', message.errorMessage);
-                    Storage.addLog('⚠️ Erreur connexion: ' + message.errorMessage);
+                    Storage.addLog('Erreur connexion: ' + message.errorMessage);
                 },
                 useSSL: true
             });
         } catch (e) {
             console.log('Erreur critique MQTT:', e);
-            Storage.addLog('⚠️ Erreur critique du client MQTT');
+            Storage.addLog('Erreur critique du client MQTT');
         }
     }
 
@@ -157,13 +171,13 @@ class MQTT {
             m.destinationName = topic;
             STATE.mqttClient.send(m);
         }
-        Storage.addLog(`📤 [${topic}] ${msg}`);
+        Storage.addLog(`[${topic}] ${msg}`);
     }
 
     static handleMessage(message) {
         const topic = message.destinationName;
         const payload = message.payloadString;
-        Storage.addLog(`📥 [${topic}] ${payload}`);
+        Storage.addLog(`[${topic}] ${payload}`);
         if (topic === CONFIG.MQTT_TOPICS.TEMP) updateTempGauge(parseFloat(payload));
     }
 }
@@ -342,7 +356,7 @@ registerView('dashboard', () => `
     <div class="container">
         <div class="dashboard-container">
             <div class="control-card">
-                <h3>💡 Contrôle LED</h3>
+                <h3>Contrôle LED</h3>
                 <div class="control-content">
                     <p>État : <span id="ledStatus">Éteinte</span></p>
                     <div class="button-group">
@@ -353,7 +367,7 @@ registerView('dashboard', () => `
             </div>
 
             <div class="control-card">
-                <h3>🌡️ Température</h3>
+                <h3>Température</h3>
                 <div class="control-content">
                     <div class="gauge">
                         <div class="gauge-fill" id="tempGauge"></div>
@@ -364,7 +378,7 @@ registerView('dashboard', () => `
             </div>
 
             <div class="control-card">
-                <h3>⚙️ Mode Simulation</h3>
+                <h3>Mode Simulation</h3>
                 <div class="control-content">
                     <label class="toggle-switch">
                         <input type="checkbox" id="simulationToggle" ${STATE.simulationActive ? 'checked' : ''}>
@@ -376,7 +390,7 @@ registerView('dashboard', () => `
         </div>
 
         <div class="logs-container">
-            <h3>📋 Logs d'activité</h3>
+            <h3>Logs d'activité</h3>
             <div class="logs-list" id="logsList">
                 ${STATE.logs.length === 0 ? '<p class="no-logs">Aucun log</p>' : STATE.logs.map(l => `
                     <div class="log-item"><strong>${l.time}</strong> - ${l.msg}</div>
@@ -442,7 +456,8 @@ function attachAuthHandlers() {
         if (user) {
             STATE.user = user;
             STATE.isAdmin = user.username === CONFIG.ADMIN_CREDS.username && user.password === CONFIG.ADMIN_CREDS.password;
-            Storage.addLog(`👤 ${user.username} connecté`);
+            Storage.saveSession(user, STATE.isAdmin);
+            Storage.addLog(`${user.username} connecté`);
             MQTT.connect();
             goTo('selection');
         } else {
@@ -505,13 +520,13 @@ function attachDashboardHandlers() {
     document.querySelector('.btn-led-on')?.addEventListener('click', () => {
         document.getElementById('ledStatus').textContent = 'Allumée 🟢';
         MQTT.publish(CONFIG.MQTT_TOPICS.LED, 'ON');
-        Storage.addLog('💡 LED allumée');
+        Storage.addLog('LED allumée');
     });
 
     document.querySelector('.btn-led-off')?.addEventListener('click', () => {
         document.getElementById('ledStatus').textContent = 'Éteinte 🔴';
         MQTT.publish(CONFIG.MQTT_TOPICS.LED, 'OFF');
-        Storage.addLog('💡 LED éteinte');
+        Storage.addLog('LED éteinte');
     });
 
     document.getElementById('simulationToggle')?.addEventListener('change', e => {
@@ -548,7 +563,7 @@ function populateAdminTable() {
 function deleteUser(email) {
     if (!confirm('Supprimer cet utilisateur ?')) return;
     Storage.deleteUser(email);
-    Storage.addLog(`🗑️ ${email} supprimé`);
+    Storage.addLog(`${email} supprimé`);
     populateAdminTable();
 }
 
@@ -561,6 +576,7 @@ document.addEventListener('click', e => {
         STATE.user = null;
         STATE.isAdmin = false;
         STATE.currentDevice = null;
+        Storage.clearSession();
         goTo('auth');
     }
 });
@@ -571,6 +587,17 @@ document.addEventListener('click', e => {
 document.addEventListener('DOMContentLoaded', () => {
     Storage.init();
     STATE.logs = Storage.getLogs();
-    goTo('auth');
+    
+    // Restaurer la session si elle existe
+    const session = Storage.getSession();
+    if (session && session.user) {
+        STATE.user = session.user;
+        STATE.isAdmin = session.isAdmin;
+        MQTT.connect();
+        goTo('selection');
+    } else {
+        goTo('auth');
+    }
+    
     console.log('✅ SPA initialisée');
 });
